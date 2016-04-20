@@ -1001,6 +1001,7 @@ static struct ssl_func crypto_sw[] = {{"CRYPTO_num_locks", NULL},
 #endif /* NO_SSL_DL */
 
 
+#if !defined(NO_TIMEGM)
 static const char *month_names[] = {"Jan",
                                     "Feb",
                                     "Mar",
@@ -1013,6 +1014,7 @@ static const char *month_names[] = {"Jan",
                                     "Oct",
                                     "Nov",
                                     "Dec"};
+#endif /* !defined(NO_TIMEGM) */
 
 /* Unified socket address. For IPv6 support, add IPv6 address structure in the
  * union u. */
@@ -4863,6 +4865,7 @@ get_request_len(const char *buf, int buflen)
 }
 
 
+#if !defined(NO_TIMEGM)
 /* Convert month to the month number. Return -1 on error, or month number */
 static int
 get_month_index(const char *s)
@@ -4933,6 +4936,7 @@ parse_date_string(const char *datetime)
 
 	return result;
 }
+#endif /* !NO_TIMEGM */
 
 
 /* Protect against directory disclosure attack by removing '..',
@@ -7015,6 +7019,7 @@ substitute_index_file(struct mg_connection *conn,
 static int
 is_not_modified(const struct mg_connection *conn, const struct file *filep)
 {
+#if !defined(NO_TIMEGM)
 	char etag[64];
 	const char *ims = mg_get_header(conn, "If-Modified-Since");
 	const char *inm = mg_get_header(conn, "If-None-Match");
@@ -7024,6 +7029,11 @@ is_not_modified(const struct mg_connection *conn, const struct file *filep)
 	}
 	return (inm != NULL && !mg_strcasecmp(etag, inm))
 	       || (ims != NULL && (filep->last_modified <= parse_date_string(ims)));
+#else /* NO_TIMEGM */
+	(void) conn;
+	(void) filep;
+	return 0;
+#endif /* !NO_TIMEGM */
 }
 
 
