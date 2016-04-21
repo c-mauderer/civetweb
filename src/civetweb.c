@@ -5851,6 +5851,33 @@ is_valid_port(unsigned long port)
 static int
 mg_inet_pton(int af, const char *src, void *dst, size_t dstlen)
 {
+
+#if defined(__rtems__) && !defined(USE_IPV6)
+	int ret = 0;
+	struct sockaddr_in *sin_dst = dst;
+	struct hostent *he;
+
+	if (af != AF_INET || dstlen != sizeof(struct sockaddr_in)) {
+		/* only IPv4 is supported */
+		return 0;
+	}
+
+	memset(sin_dst, '0', dstlen);
+
+	/* FIXME: gethostbyname is NOT thread-save! */
+	he = gethostbyname(src);
+	if(he != NULL) {
+		sin_dst->sin_family = af;
+		memcpy(&sin_dst->sin_addr, he->h_addr_list[0], he->h_length);
+		ret = 1;
+	}
+
+	return ret;
+
+#else /* !defined(__rtems) || defined(USE_IPV6) */
+#if defined(__rtems__)
+#warning This does not work with the integrated (old) RTEMS network stack
+#endif
 	struct addrinfo hints, *res, *ressave;
 	int ret = 0;
 
@@ -5874,6 +5901,7 @@ mg_inet_pton(int af, const char *src, void *dst, size_t dstlen)
 
 	freeaddrinfo(ressave);
 	return ret;
+#endif /* defined(__rtems) && !defined(USE_IPV6) */
 }
 
 
