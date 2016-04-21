@@ -1379,7 +1379,9 @@ mg_atomic_inc(volatile int *addr)
 	 * so whatever you use, the other SDK is likely to raise a warning. */
 	ret = InterlockedIncrement((volatile long *)addr);
 #elif defined(__GNUC__)                                                        \
-    && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 0)))
+    && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 0)))           \
+    && !defined(__rtems__)
+    /* FIXME: Use libatomic support as soon as it is provided. */
 	ret = __sync_add_and_fetch(addr, 1);
 #else
 	ret = (++(*addr));
@@ -1398,7 +1400,9 @@ mg_atomic_dec(volatile int *addr)
 	 * so whatever you use, the other SDK is likely to raise a warning. */
 	ret = InterlockedDecrement((volatile long *)addr);
 #elif defined(__GNUC__)                                                        \
-    && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 0)))
+    && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 0)))           \
+    && !defined(__rtems__)
+    /* FIXME: Use libatomic support as soon as it is provided. */
 	ret = __sync_sub_and_fetch(addr, 1);
 #else
 	ret = (--(*addr));
