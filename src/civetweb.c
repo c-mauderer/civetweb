@@ -387,17 +387,6 @@ typedef struct DIR {
 	struct dirent result;
 } DIR;
 
-#if defined(_WIN32) && !defined(POLLIN)
-#ifndef HAVE_POLL
-struct pollfd {
-	SOCKET fd;
-	short events;
-	short revents;
-};
-#define POLLIN (0x0300)
-#endif
-#endif
-
 /* Mark required libraries */
 #if defined(_MSC_VER)
 #pragma comment(lib, "Ws2_32.lib")
@@ -408,7 +397,9 @@ struct pollfd {
 
 #include <sys/wait.h>
 #include <sys/socket.h>
+#ifdef HAVE_POLL
 #include <sys/poll.h>
+#endif
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
@@ -480,6 +471,15 @@ typedef int SOCKET;
 
 #endif /* defined(_WIN32) && !defined(__SYMBIAN32__) - WINDOWS / UNIX include  \
           block */
+
+#ifndef HAVE_POLL
+struct pollfd {
+	SOCKET fd;
+	short events;
+	short revents;
+};
+#define POLLIN (0x0300)
+#endif
 
 /* va_copy should always be a macro, C99 and C++11 - DTL */
 #ifndef va_copy
@@ -3169,42 +3169,6 @@ mg_readdir(DIR *dir)
 }
 
 
-#ifndef HAVE_POLL
-static int
-poll(struct pollfd *pfd, unsigned int n, int milliseconds)
-{
-	struct timeval tv;
-	fd_set set;
-	unsigned int i;
-	int result;
-	SOCKET maxfd = 0;
-
-	memset(&tv, 0, sizeof(tv));
-	tv.tv_sec = milliseconds / 1000;
-	tv.tv_usec = (milliseconds % 1000) * 1000;
-	FD_ZERO(&set);
-
-	for (i = 0; i < n; i++) {
-		FD_SET((SOCKET)pfd[i].fd, &set);
-		pfd[i].revents = 0;
-
-		if (pfd[i].fd > maxfd) {
-			maxfd = pfd[i].fd;
-		}
-	}
-
-	if ((result = select((int)maxfd + 1, &set, NULL, NULL, &tv)) > 0) {
-		for (i = 0; i < n; i++) {
-			if (FD_ISSET(pfd[i].fd, &set)) {
-				pfd[i].revents = POLLIN;
-			}
-		}
-	}
-
-	return result;
-}
-#endif /* HAVE_POLL */
-
 #if defined(__MINGW32__)
 /* Enable unused function warning again */
 #pragma GCC diagnostic pop
@@ -3770,6 +3734,41 @@ set_non_blocking_mode(SOCKET sock)
 #endif /* _WIN32 */
 /* End of initial operating system specific define block. */
 
+#ifndef HAVE_POLL
+static int
+poll(struct pollfd *pfd, unsigned int n, int milliseconds)
+{
+	struct timeval tv;
+	fd_set set;
+	unsigned int i;
+	int result;
+	SOCKET maxfd = 0;
+
+	memset(&tv, 0, sizeof(tv));
+	tv.tv_sec = milliseconds / 1000;
+	tv.tv_usec = (milliseconds % 1000) * 1000;
+	FD_ZERO(&set);
+
+	for (i = 0; i < n; i++) {
+		FD_SET((SOCKET)pfd[i].fd, &set);
+		pfd[i].revents = 0;
+
+		if (pfd[i].fd > maxfd) {
+			maxfd = pfd[i].fd;
+		}
+	}
+
+	if ((result = select((int)maxfd + 1, &set, NULL, NULL, &tv)) > 0) {
+		for (i = 0; i < n; i++) {
+			if (FD_ISSET(pfd[i].fd, &set)) {
+				pfd[i].revents = POLLIN;
+			}
+		}
+	}
+
+	return result;
+}
+#endif /* HAVE_POLL */
 
 /* Get a random number (independent of C rand function) */
 static uint64_t
