@@ -3239,19 +3239,25 @@ mg_start_thread(mg_thread_func_t f, void *p)
 
 /* Start a thread storing the thread context. */
 static int
-mg_start_thread_with_id(unsigned(__stdcall *f)(void *),
+mg_start_thread_with_id(mg_thread_func_t func,
                         void *p,
-                        pthread_t *threadidptr)
+                        pthread_t *threadidptr,
+                        mg_context *ctx,
+                        enum mg_thread_type type)
 {
 	uintptr_t uip;
 	HANDLE threadhandle;
 	int result = -1;
 
-	uip = _beginthreadex(NULL, 0, (unsigned(__stdcall *)(void *))f, p, 0, NULL);
-	threadhandle = (HANDLE)uip;
-	if ((uip != (uintptr_t)(-1L)) && (threadidptr != NULL)) {
-		*threadidptr = threadhandle;
-		result = 0;
+	if(ctx->callbacks.start_thread != NULL) {
+		result = ctx->callbacks.start_thread(ctx, type, f, p);
+	} else {
+		uip = _beginthreadex(NULL, 0, func, p, 0, NULL);
+		threadhandle = (HANDLE)uip;
+		if ((uip != (uintptr_t)(-1L)) && (threadidptr != NULL)) {
+			*threadidptr = threadhandle;
+			result = 0;
+		}
 	}
 
 	return result;
@@ -3569,25 +3575,32 @@ mg_start_thread(mg_thread_func_t func, void *param)
 static int
 mg_start_thread_with_id(mg_thread_func_t func,
                         void *param,
-                        pthread_t *threadidptr)
+                        pthread_t *threadidptr,
+                        mg_context *ctx,
+                        enum mg_thread_type type)
 {
 	pthread_t thread_id;
 	pthread_attr_t attr;
 	int result;
 
-	(void)pthread_attr_init(&attr);
+	if(ctx->callbacks.start_thread != NULL) {
+		result = ctx->callbacks.start_thread(ctx, type, f, p);
+	} else {
+		(void)pthread_attr_init(&attr);
 
 #if defined(USE_STACK_SIZE) && (USE_STACK_SIZE > 1)
-	/* Compile-time option to control stack size,
-	 * e.g. -DUSE_STACK_SIZE=16384 */
-	(void)pthread_attr_setstacksize(&attr, USE_STACK_SIZE);
+		/* Compile-time option to control stack size,
+		 * e.g. -DUSE_STACK_SIZE=16384 */
+		(void)pthread_attr_setstacksize(&attr, USE_STACK_SIZE);
 #endif /* defined(USE_STACK_SIZE) && USE_STACK_SIZE > 1 */
 
-	result = pthread_create(&thread_id, &attr, func, param);
-	pthread_attr_destroy(&attr);
-	if ((result == 0) && (threadidptr != NULL)) {
-		*threadidptr = thread_id;
+		result = pthread_create(&thread_id, &attr, func, param);
+		pthread_attr_destroy(&attr);
+		if ((result == 0) && (threadidptr != NULL)) {
+			*threadidptr = thread_id;
+		}
 	}
+
 	return result;
 }
 
@@ -12010,13 +12023,8 @@ struct websocket_client_thread_data {
 };
 
 
-#if defined(USE_WEBSOCKET)
-#ifdef _WIN32
-static unsigned __stdcall websocket_client_thread(void *data)
-#else
-static void *
+static void
 websocket_client_thread(void *data)
-#endif
 {
 	struct websocket_client_thread_data *cdata =
 	    (struct websocket_client_thread_data *)data;
@@ -12027,7 +12035,9 @@ websocket_client_thread(void *data)
 		if (cdata->conn->ctx->callbacks.init_thread) {
 			/* 3 indicates a websocket client thread */
 			/* TODO: check if conn->ctx can be set */
-			cdata->conn->ctx->callbacks.init_thread(cdata->conn->ctx, 3);
+			cdata->conn->ctx->callbacks.init_thread(
+			    cdata->conn->ctx,
+			    MG_THREAD_TIMER);
 		}
 	}
 
@@ -12040,14 +12050,7 @@ websocket_client_thread(void *data)
 	}
 
 	mg_free((void *)cdata);
-
-#ifdef _WIN32
-	return 0;
-#else
-	return NULL;
-#endif
 }
-#endif
 
 
 struct mg_connection *
@@ -12142,7 +12145,9 @@ mg_connect_websocket_client(const char *host,
 	 * called on the client connection */
 	if (mg_start_thread_with_id(websocket_client_thread,
 	                            (void *)thread_data,
-	                            newctx->workerthreadids) != 0) {
+	                            newctx->workerthreadids,
+	                            ctx,
+	                            MG_THREAD_TIMER) != 0) {
 		mg_free((void *)thread_data);
 		mg_free((void *)newctx->workerthreadids);
 		mg_free((void *)newctx);
@@ -12365,7 +12370,7 @@ worker_thread_run(void *thread_func_param)
 
 	if (ctx->callbacks.init_thread) {
 		/* call init_thread for a worker thread (type 1) */
-		ctx->callbacks.init_thread(ctx, 1);
+		ctx->callbacks.init_thread(ctx, MG_THREAD_WORKER);
 	}
 
 	conn =
@@ -12449,21 +12454,11 @@ worker_thread_run(void *thread_func_param)
 }
 
 
-/* Threads have different return types on Windows and Unix. */
-#ifdef _WIN32
-static unsigned __stdcall worker_thread(void *thread_func_param)
-{
-	worker_thread_run(thread_func_param);
-	return 0;
-}
-#else
-static void *
+static void
 worker_thread(void *thread_func_param)
 {
 	worker_thread_run(thread_func_param);
-	return NULL;
 }
-#endif /* _WIN32 */
 
 
 /* Master thread adds accepted socket to a queue */
@@ -12625,7 +12620,7 @@ master_thread_run(void *thread_func_param)
 
 	if (ctx->callbacks.init_thread) {
 		/* Callback for the master thread (type 0) */
-		ctx->callbacks.init_thread(ctx, 0);
+		ctx->callbacks.init_thread(ctx, MG_THREAD_MASTER);
 	}
 
 	/* Server starts *now* */
@@ -12696,21 +12691,11 @@ master_thread_run(void *thread_func_param)
 }
 
 
-/* Threads have different return types on Windows and Unix. */
-#ifdef _WIN32
-static unsigned __stdcall master_thread(void *thread_func_param)
-{
-	master_thread_run(thread_func_param);
-	return 0;
-}
-#else
-static void *
+static void
 master_thread(void *thread_func_param)
 {
 	master_thread_run(thread_func_param);
-	return NULL;
 }
-#endif /* _WIN32 */
 
 
 static void
@@ -13055,7 +13040,11 @@ mg_start(const struct mg_callbacks *callbacks,
 	ctx->context_type = 1; /* server context */
 
 	/* Start master (listening) thread */
-	mg_start_thread_with_id(master_thread, ctx, &ctx->masterthreadid);
+	mg_start_thread_with_id(master_thread,
+	                        ctx,
+	                        &ctx->masterthreadid,
+	                        ctx,
+	                        MG_THREAD_MASTER);
 
 	/* Start worker threads */
 	for (i = 0; i < ctx->cfg_worker_threads; i++) {
@@ -13064,7 +13053,9 @@ mg_start(const struct mg_callbacks *callbacks,
 		(void)pthread_mutex_unlock(&ctx->thread_mutex);
 		if (mg_start_thread_with_id(worker_thread,
 		                            ctx,
-		                            &ctx->workerthreadids[i]) != 0) {
+		                            &ctx->workerthreadids[i]
+		                            ctx,
+		                            MG_THREAD_WORKER) != 0) {
 			(void)pthread_mutex_lock(&ctx->thread_mutex);
 			ctx->running_worker_threads--;
 			(void)pthread_mutex_unlock(&ctx->thread_mutex);

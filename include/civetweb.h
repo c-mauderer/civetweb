@@ -52,6 +52,8 @@ extern "C" {
 struct mg_context;    /* Handle for the HTTP service itself */
 struct mg_connection; /* Handle for the individual connection */
 
+/* Type for a function that is starte as a thread */
+typedef void (*mg_thread_func_t)(void *);
 
 /* This structure contains information about the HTTP request. */
 struct mg_request_info {
@@ -88,6 +90,12 @@ struct mg_request_info {
 	} http_headers[64];    /* Maximum 64 headers */
 };
 
+/* A type for identifying the type of a thread. Used for some callbacks. */
+enum mg_thread_type {
+	MG_THREAD_MASTER = 0,      /* the master thread */
+	MG_THREAD_WORKER = 1,      /* thread handling client connections */
+	MG_THREAD_TIMER = 2,       /* internal helper thread */
+}
 
 /* This structure needs to be passed to mg_start(), to let civetweb know
    which callbacks to invoke. For a detailed description, see
@@ -212,12 +220,20 @@ struct mg_callbacks {
 	/* Called when a new worker thread is initialized.
 	   Parameters:
 	     ctx: context handle
-	     thread_type:
-	       0 indicates the master thread
-	       1 indicates a worker thread handling client connections
-	       2 indicates an internal helper thread (timer thread)
-	       */
-	void (*init_thread)(const struct mg_context *ctx, int thread_type);
+	     thread_type: type of the thread */
+	void (*init_thread)(const struct mg_context *ctx,
+	                    enum mg_thread_type thread_type);
+
+	/* Called to start a new thread.
+	   Parameters:
+	     ctx: context handle
+	     thread_type: type of the thread
+	     func: function that should be started as the new thread
+	     param: parameter given to the new thread */
+	int (*start_thread)(const struct mg_context *ctx,
+	                    int thread_type,
+	                    mg_thread_func_t func,
+	                    void *param)
 
 	/* Called when civetweb context is deleted.
 	   Parameters:
@@ -849,7 +865,6 @@ CIVETWEB_API int mg_handle_form_request(struct mg_connection *conn,
 
 /* Convenience function -- create detached thread.
    Return: 0 on success, non-0 on error. */
-typedef void *(*mg_thread_func_t)(void *);
 CIVETWEB_API int mg_start_thread(mg_thread_func_t f, void *p);
 
 
